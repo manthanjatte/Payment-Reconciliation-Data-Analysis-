@@ -1,1 +1,58 @@
+import pandas as pd
+from sqlalchemy import create_engine
+import numpy as np
+from datetime import datetime
+
+# Load Excel files for different payment gateways
+# Replace these with actual file paths for each payment gateway's Excel file
+ccavenue_df = pd.read_excel('data/ccavenue.xlsx')
+payu_df = pd.read_excel('data/payu.xlsx')
+policybazar_df = pd.read_excel('data/policybazar.xlsx')
+finsal_df = pd.read_excel('data/finsal.xlsx')
+
+# 1. Clean and Preprocess Each Payment Gateway Dataset
+
+def clean_data(df, gateway_name):
+    """
+    Clean the individual payment gateway data.
+    """
+    df.columns = [col.lower().strip() for col in df.columns]  # Standardize column names
+    df['payment_gateway'] = gateway_name  # Add payment gateway name
+    df['payment_date'] = pd.to_datetime(df['payment_date'], errors='coerce')  # Convert to datetime
+
+    # Fill missing values and standardize
+    df['amount'] = df['amount'].fillna(0)
+    df['tracking_id'] = df['tracking_id'].fillna('Unknown')
+    df['proposal_id'] = df['proposal_id'].fillna('Unknown')
+    
+    return df
+
+# Clean each dataset
+ccavenue_cleaned = clean_data(ccavenue_df, 'CC Avenue')
+payu_cleaned = clean_data(payu_df, 'PayU')
+policybazar_cleaned = clean_data(policybazar_df, 'Policy Bazar')
+finsal_cleaned = clean_data(finsal_df, 'Finsal')
+
+# 2. Combine all datasets into one
+combined_data = pd.concat([ccavenue_cleaned, payu_cleaned, policybazar_cleaned, finsal_cleaned], ignore_index=True)
+
+# 3. Additional Cleaning (if needed)
+# Example: Fill missing values or resolve discrepancies in merged data
+combined_data['amount'] = combined_data['amount'].fillna(0)
+combined_data['payment_date'] = pd.to_datetime(combined_data['payment_date'], errors='coerce')
+
+# 4. Save the cleaned data to a CSV (for reference or further use)
+combined_data.to_csv('data/cleaned_combined_data.csv', index=False)
+
+print("Data cleaning completed and saved to cleaned_combined_data.csv")
+
+# 5. Connect to SQL Server using SQLAlchemy
+# Replace these with your actual SQL Server credentials
+connection_string = 'mssql+pyodbc://username:password@server/database_name?driver=SQL+Server'
+engine = create_engine(connection_string)
+
+# 6. Upload the cleaned combined data to SQL Server
+combined_data.to_sql('cleaned_insurance_data', con=engine, index=False, if_exists='replace')
+
+print("Data uploaded to SQL Server successfully!")
 
