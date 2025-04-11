@@ -1,1 +1,146 @@
+-- Total Premium Collected
+Total Premium Collected = 
+CALCULATE(
+    SUM(payments[amount]),
+    payments[pg_status] = "Success"
+)
+
+-- Payment Success Rate (%)
+Payment Success Rate (%) = 
+DIVIDE(
+    CALCULATE(COUNTROWS(payments), payments[pg_status] = "Success"),
+    COUNTROWS(payments),
+    0
+) * 100
+
+-- Failed Payments
+Failed Payments = 
+CALCULATE(
+    COUNTROWS(payments),
+    payments[pg_status] = "Failed"
+)
+
+-- Pending KYC Proposals
+Pending KYC Proposals = 
+CALCULATE(
+    COUNTROWS(proposals),
+    RELATED(kyc_verification[is_verified]) = 0
+)
+
+-- QC Discrepancy Count
+QC Discrepancy Count = 
+CALCULATE(
+    COUNTROWS(qc_discrepancies),
+    qc_discrepancies[has_discrepancy] = 1 &&
+    qc_discrepancies[resolved] = 0
+)
+
+-- Underwriting Pending Proposals
+Underwriting Pending = 
+CALCULATE(
+    COUNTROWS(underwriting),
+    underwriting[approval_status] = "Pending"
+)
+
+-- Proposals Stuck in Staging
+Stuck in Staging = 
+CALCULATE(
+    COUNTROWS(proposals),
+    proposals[status] = "Stuck in Staging"
+)
+
+-- Total Policies Issued
+Total Policies Issued = 
+CALCULATE(
+    COUNTROWS(policies),
+    policies[status] = "Active"
+)
+
+-- Proposal Conversion Rate (%)
+Proposal Conversion Rate (%) = 
+DIVIDE(
+    COUNTROWS(policies),
+    COUNTROWS(proposals),
+    0
+) * 100
+
+-- Average Days from Proposal to Policy
+Avg Days to Policy = 
+AVERAGEX(
+    policies,
+    DATEDIFF(
+        RELATED(proposals[created_at]),
+        policies[issued_date],
+        DAY
+    )
+)
+
+-- Gateway Success Rate (%)
+Gateway Success Rate (%) = 
+DIVIDE(
+    CALCULATE(COUNTROWS(payments), payments[pg_status] = "Success"),
+    COUNTROWS(payments),
+    0
+) * 100
+
+-- Premium by Region
+Premium by Region = 
+CALCULATE(
+    SUM(payments[amount]),
+    payments[pg_status] = "Success"
+)
+
+-- Duplicates Flag (Calculated Column)
+Is Duplicate = 
+VAR Proposal = payments[proposal_id]
+VAR Amount = payments[amount]
+VAR Date = payments[payment_date]
+RETURN
+CALCULATE(
+    COUNTROWS(payments),
+    FILTER(
+        payments,
+        payments[proposal_id] = Proposal &&
+        payments[amount] = Amount &&
+        payments[payment_date] = Date
+    )
+) > 1
+
+-- Total Duplicate Payments
+Total Duplicates = 
+CALCULATE(
+    COUNTROWS(payments),
+    payments[Is Duplicate] = TRUE
+)
+
+--- Calculated Column for Gateway Mapping
+Payment Gateway = 
+SWITCH(
+    TRUE(),
+    LEFT(pg_response[tracking_id], 3) = "113", "CC Avenue",
+    LEFT(pg_response[tracking_id], 2) = "20", "PayU",
+    LEFT(pg_response[tracking_id], 1) = "R", "Policy Bazar",
+    LEFT(pg_response[tracking_id], 1) = "F", "Finsal",
+    "Unknown"
+)
+
+---Count Policies Generated via CC Avenue
+Policies via CC Avenue = 
+CALCULATE(
+    COUNTROWS(policies),
+    FILTER(
+        pg_response,
+        pg_response[Payment Gateway] = "CC Avenue"
+    )
+)
+
+--Count For All Gateways
+Policies by Gateway = 
+CALCULATE(
+    COUNTROWS(policies)
+)
+
+
+
+
 
