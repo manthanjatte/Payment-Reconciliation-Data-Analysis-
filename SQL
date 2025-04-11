@@ -1,1 +1,202 @@
+-- Proposals Table
+CREATE TABLE proposals (
+    proposal_id INT PRIMARY KEY,
+    quote_no VARCHAR(50),
+    customer_id INT,
+    created_at DATETIME,
+    status VARCHAR(20) -- e.g. 'Pending KYC', 'QC Discrepancy', 'Underwriting', 'Stuck in Staging'
+);
+
+-- Payments Table
+CREATE TABLE payments (
+    payment_id INT PRIMARY KEY,
+    proposal_id INT,
+    payment_date DATETIME,
+    amount DECIMAL(10, 2),
+    pg_gateway VARCHAR(50),
+    pg_status VARCHAR(20),
+    FOREIGN KEY (proposal_id) REFERENCES proposals(proposal_id)
+);
+
+-- KYC Table
+CREATE TABLE kyc_verification (
+    proposal_id INT,
+    is_verified BIT,
+    verified_on DATETIME,
+    FOREIGN KEY (proposal_id) REFERENCES proposals(proposal_id)
+);
+
+-- QC Table
+CREATE TABLE qc_discrepancies (
+    proposal_id INT,
+    has_discrepancy BIT,
+    resolved BIT,
+    notes VARCHAR(255)
+);
+
+-- Underwriting Table
+CREATE TABLE underwriting (
+    proposal_id INT,
+    approval_status VARCHAR(20), -- 'Pending', 'Approved', 'Rejected'
+    underwriter_remarks VARCHAR(255)
+);
+
+
+-- Policy Table
+CREATE TABLE policies (
+    policy_id INT PRIMARY KEY,
+    proposal_id INT,
+    issued_date DATETIME,
+    status VARCHAR(20), -- 'Active', 'Stuck in Staging', 'Pending'
+    FOREIGN KEY (proposal_id) REFERENCES proposals(proposal_id)
+);
+
+*** Sample SQL Queries for Analysis ****
+
+1. Check Stuck Proposals
+
+SELECT p.proposal_id, p.status, pay.pg_status, kyc.is_verified, qc.has_discrepancy
+FROM proposals p
+LEFT JOIN payments pay ON p.proposal_id = pay.proposal_id
+LEFT JOIN kyc_verification kyc ON p.proposal_id = kyc.proposal_id
+LEFT JOIN qc_discrepancies qc ON p.proposal_id = qc.proposal_id
+WHERE p.status = 'Stuck in Staging';
+
+2. Identify Proposals Awaiting Underwriter Approval
+
+SELECT p.proposal_id, u.approval_status, pay.pg_gateway
+FROM proposals p
+JOIN underwriting u ON p.proposal_id = u.proposal_id
+JOIN payments pay ON p.proposal_id = pay.proposal_id
+WHERE u.approval_status = 'Pending';
+
+3. Reconciliation with PG Response
+
+SELECT proposal_id, pg_gateway, COUNT(*) AS total_transactions,
+       SUM(CASE WHEN pg_status = 'Success' THEN 1 ELSE 0 END) AS success_count
+FROM payments
+GROUP BY proposal_id, pg_gateway;
+
+4. Proposals Delayed Due to QC Discrepancy
+
+SELECT p.proposal_id, c.name, qc.notes
+FROM proposals p
+JOIN customers c ON p.customer_id = c.customer_id
+JOIN qc_discrepancies qc ON p.proposal_id = qc.proposal_id
+WHERE qc.has_discrepancy = 1 AND qc.resolved = 0;
+
+5. Proposals Pending KYC Verification
+SELECT 
+    p.proposal_id, 
+    c.name AS customer_name, 
+    p.created_at
+FROM proposals p
+JOIN customers c ON p.customer_id = c.customer_id
+LEFT JOIN kyc_verification k ON p.proposal_id = k.proposal_id
+WHERE k.is_verified IS NULL OR k.is_verified = 0;
+
+6. Payment Status Summary by Policy Type
+SELECT 
+    pol.policy_type,
+    pay.pg_gateway,
+    COUNT(*) AS total_payments,
+    SUM(CASE WHEN pay.pg_status = 'Success' THEN 1 ELSE 0 END) AS success_count,
+    SUM(CASE WHEN pay.pg_status = 'Failed' THEN 1 ELSE 0 END) AS failure_count
+FROM payments pay
+JOIN proposals p ON pay.proposal_id = p.proposal_id
+JOIN policies pol ON p.proposal_id = pol.proposal_id
+GROUP BY pol.policy_type, pay.pg_gateway;
+
+7. Policy Issuance Conversion Rate
+SELECT
+    COUNT(DISTINCT proposal_id) AS total_proposals,
+    COUNT(DISTINCT policy_id) AS total_policies,
+    ROUND(COUNT(DISTINCT policy_id) * 100.0 / COUNT(DISTINCT proposal_id), 2) AS conversion_rate
+FROM proposals
+LEFT JOIN policies ON proposals.proposal_id = policies.proposal_id;
+
+8. List of Proposals in QC Discrepancy
+SELECT 
+    p.proposal_id, 
+    qc.notes, 
+    qc.resolved, 
+    c.name, 
+    p.created_at
+FROM qc_discrepancies qc
+JOIN proposals p ON p.proposal_id = qc.proposal_id
+JOIN customers c ON c.customer_id = p.customer_id
+WHERE qc.has_discrepancy = 1;
+
+9. Proposals Stuck in Staging Mapping
+SELECT 
+    p.proposal_id,
+    pay.pg_gateway,
+    p.status,
+    k.is_verified AS kyc_done,
+    qc.has_discrepancy,
+    u.approval_status AS underwriting_status
+FROM proposals p
+LEFT JOIN payments pay ON p.proposal_id = pay.proposal_id
+LEFT JOIN kyc_verification k ON p.proposal_id = k.proposal_id
+LEFT JOIN qc_discrepancies qc ON p.proposal_id = qc.proposal_id
+LEFT JOIN underwriting u ON p.proposal_id = u.proposal_id
+WHERE p.status = 'Stuck in Staging';
+
+10. Underwriting Pending List
+SELECT 
+    p.proposal_id,
+    c.name,
+    pay.pg_status,
+    k.is_verified,
+    u.approval_status
+FROM underwriting u
+JOIN proposals p ON u.proposal_id = p.proposal_id
+JOIN customers c ON c.customer_id = p.customer_id
+JOIN payments pay ON pay.proposal_id = p.proposal_id
+JOIN kyc_verification k ON k.proposal_id = p.proposal_id
+WHERE u.approval_status = 'Pending';
+
+11. Total Premium Collected by Region
+SELECT 
+    c.region,
+    SUM(pay.amount) AS total_premium
+FROM payments pay
+JOIN proposals p ON pay.proposal_id = p.proposal_id
+JOIN customers c ON p.customer_id = c.customer_id
+WHERE pay.pg_status = 'Success'
+GROUP BY c.region;
+
+12. Average Time from Proposal to Policy Issuance
+SELECT 
+    AVG(DATEDIFF(DAY, p.created_at, pol.issued_date)) AS avg_days_to_issue
+FROM proposals p
+JOIN policies pol ON p.proposal_id = pol.proposal_id
+WHERE pol.status = 'Active';
+
+13. Daily Payment Success/Failure Trend
+SELECT 
+    CAST(payment_date AS DATE) AS payment_day,
+    SUM(CASE WHEN pg_status = 'Success' THEN 1 ELSE 0 END) AS success_count,
+    SUM(CASE WHEN pg_status = 'Failed' THEN 1 ELSE 0 END) AS failure_count
+FROM payments
+GROUP BY CAST(payment_date AS DATE)
+ORDER BY payment_day;
+10. Count of Proposals at Each Stage (Pipeline View)
+SELECT
+    COUNT(*) FILTER (WHERE k.is_verified = 0 OR k.is_verified IS NULL) AS pending_kyc,
+    COUNT(*) FILTER (WHERE qc.has_discrepancy = 1 AND qc.resolved = 0) AS qc_pending,
+    COUNT(*) FILTER (WHERE u.approval_status = 'Pending') AS underwriting_pending,
+    COUNT(*) FILTER (WHERE p.status = 'Stuck in Staging') AS staging_issues,
+    COUNT(*) FILTER (WHERE pol.policy_id IS NOT NULL) AS policies_issued
+FROM proposals p
+LEFT JOIN kyc_verification k ON p.proposal_id = k.proposal_id
+LEFT JOIN qc_discrepancies qc ON p.proposal_id = qc.proposal_id
+LEFT JOIN underwriting u ON p.proposal_id = u.proposal_id
+LEFT JOIN policies pol ON p.proposal_id = pol.proposal_id;
+
+
+
+
+
+
 
